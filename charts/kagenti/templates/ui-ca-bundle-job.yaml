@@ -1,0 +1,104 @@
+{{- if and .Values.components.ui.enabled .Values.ui.trustCustomCA .Values.openshift }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ca-bundle-job-sa
+  namespace: "{{ .Values.ui.namespace }}"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ca-bundle-job-role
+  namespace: "{{ .Values.ui.namespace }}"
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ca-bundle-job-binding
+  namespace: "{{ .Values.ui.namespace }}"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ca-bundle-job-role
+subjects:
+  - kind: ServiceAccount
+    name: ca-bundle-job-sa
+    namespace: "{{ .Values.ui.namespace }}"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ca-bundle-secret-reader
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames: ["router-ca"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ca-bundle-secret-reader-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ca-bundle-secret-reader
+subjects:
+  - kind: ServiceAccount
+    name: ca-bundle-job-sa
+    namespace: "{{ .Values.ui.namespace }}"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-ca-bundle
+  namespace: "{{ .Values.ui.namespace }}"
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  template:
+    metadata:
+      name: create-ca-bundle
+    spec:
+      serviceAccountName: ca-bundle-job-sa
+      restartPolicy: OnFailure
+      containers:
+      - name: create-bundle
+        image: "{{ .Values.common.kubectlImage }}"
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "Creating CA bundle with OpenShift ingress certificate..."
+
+          # Get the base CA bundle (common trusted CAs)
+          BASE_BUNDLE=$(cat /etc/pki/tls/certs/ca-bundle.crt)
+
+          # Try to get the OpenShift ingress operator CA certificate
+          if kubectl get secret router-ca -n openshift-ingress-operator >/dev/null 2>&1; then
+            INGRESS_CA=$(kubectl get secret router-ca -n openshift-ingress-operator -o jsonpath='{.data.tls\.crt}' | base64 -d)
+            COMBINED_BUNDLE=$(printf "%s\n%s" "$BASE_BUNDLE" "$INGRESS_CA")
+          else
+            echo "Warning: router-ca secret not found, using base CA bundle only"
+            COMBINED_BUNDLE="$BASE_BUNDLE"
+          fi
+
+          # Create or update the ConfigMap
+          kubectl create configmap {{ .Values.ui.caConfigMap }} \
+            -n {{ .Values.ui.namespace }} \
+            --from-literal=ca-bundle.crt="$COMBINED_BUNDLE" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          echo "CA bundle ConfigMap '{{ .Values.ui.caConfigMap }}' created successfully"
+{{- end }}

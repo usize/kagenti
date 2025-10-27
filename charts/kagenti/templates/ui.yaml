@@ -30,6 +30,12 @@ spec:
               value: "/app/.cache/uv"
             - name: "ENABLE_AUTH"
               value: "{{- .Values.ui.auth.enabled }}"
+{{- if .Values.ui.trustCustomCA }}
+            - name: SSL_CERT_FILE
+              value: "{{ .Values.ui.caMountPath }}/{{ .Values.ui.caFileName }}"
+            - name: REQUESTS_CA_BUNDLE
+              value: "{{ .Values.ui.caMountPath }}/{{ .Values.ui.caFileName }}"
+{{- end }}
             - name: "CLIENT_ID"
               valueFrom:
                 secretKeyRef:
@@ -101,6 +107,11 @@ spec:
               mountPath: /app/.cache
             - name: streamlit
               mountPath: /.streamlit
+{{- if .Values.ui.trustCustomCA }}
+            - name: trusted-ca
+              mountPath: {{ .Values.ui.caMountPath }}
+              readOnly: true
+{{- end }}
           ports:
             - containerPort: 8501
           resources:
@@ -115,6 +126,14 @@ spec:
           emptyDir: {}
         - name: streamlit
           emptyDir: {}
+{{- if .Values.ui.trustCustomCA }}
+        - name: trusted-ca
+          configMap:
+            name: {{ .Values.ui.caConfigMap }}
+            items:
+              - key: ca-bundle.crt
+                path: {{ .Values.ui.caFileName }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service

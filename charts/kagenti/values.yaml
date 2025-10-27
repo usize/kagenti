@@ -51,6 +51,13 @@ ui:
   namespace: kagenti-system
   image: ghcr.io/kagenti/kagenti/ui
   tag: v0.1.0-alpha.7
+  # Trust custom/self-signed CA certificates
+  # On OpenShift: auto-creates CA bundle from ingress operator
+  # Other platforms: create ConfigMap with name below containing key 'ca-bundle.crt'
+  trustCustomCA: false
+  caConfigMap: config-trusted-cabundle
+  caMountPath: /etc/pki/ca-trust/extracted/pem
+  caFileName: tls-ca-bundle.pem
 
 # ------------------------------------------------------------------
 #  Platform Operator Configuration
